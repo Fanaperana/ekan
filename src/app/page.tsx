@@ -1,32 +1,11 @@
 'use client'
 
-import { useState, useRef, KeyboardEvent, useEffect, FC } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { ArrowUp, MoveLeft, MoveRight, Plus, Save, Upload } from "lucide-react";
-import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
+import { useState, useRef, KeyboardEvent, useEffect } from 'react';
+import { ArrowUp, MoveLeft, MoveRight, Plus, Save, Trash2, Upload } from "lucide-react";
 import * as dialog from '@tauri-apps/plugin-dialog';
 import { db } from '@/lib/db';
-// import type { Workspace, Page, Markdown } from '@/lib/types';
-
-
-interface Workspace {
-  id: number;
-  name: string;
-}
-
-interface Page {
-  id: number;
-  title: string;
-  position: number;
-  workspace_id: number;
-}
-
-interface Markdown {
-  id: number;
-  content: string;
-  position: number;
-  page_id: number;
-}
+import type { Workspace, Page, Markdown } from '@/lib/types';
+import { DialogInput } from './components/DialogInout';
 
 export default function Home() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -35,117 +14,232 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState<Page | null>(null);
   const [markdowns, setMarkdowns] = useState<Markdown[]>([]);
   const [inputContent, setInputContent] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isWorkspaceDialogOpen, setIsWorkspaceDialogOpen] = useState(false);
+  const [isPageTitleDialogOpen, setIsPageTitleDialogOpen] = useState(false);
+  const [workspaceInput, setWorkspaceInput] = useState('');
+  const [pageTitleInput, setPageTitleInput] = useState('');
+
   const inputRef = useRef<HTMLDivElement>(null);
 
-  const [isWorkspaceDialogOpen, setIsWorkspaceDialogOpen] = useState(false);
-
-  // const dbRef = useRef<DatabaseService>(null);
-  // Initialize app
-  useEffect(() => {
-    loadWorkspaces();
-    (async ()=>{
-      const workspaceId = await db.createWorkspace('test');
-      console.log(workspaceId);
-    })()
-  }, []);
-
-  // Load workspaces
-  const loadWorkspaces = async () => {
-    try {
-      const workspaceList = await invoke<Workspace[]>('get_workspaces');
-      setWorkspaces(workspaceList);
-      if (workspaceList.length > 0 && !currentWorkspace) {
-        setCurrentWorkspace(workspaceList[0]);
-        loadPages(workspaceList[0].id);
-      }
-    } catch (error) {
-      console.error('Error loading workspaces:', error);
-    }
-  };
-
-  // Load pages for workspace
-  const loadPages = async (workspaceId: number) => {
-    try {
-      const pageList = await invoke<Page[]>('get_pages', { workspaceId });
-      setPages(pageList);
-      if (pageList.length > 0) {
-        setCurrentPage(pageList[0]);
-        loadMarkdowns(pageList[0].id);
-      }
-    } catch (error) {
-      console.error('Error loading pages:', error);
-    }
-  };
-
-  // Load markdowns for page
+  // Function declarations
   const loadMarkdowns = async (pageId: number) => {
     try {
-      const markdownList = await invoke<Markdown[]>('get_markdowns', { pageId });
+      const markdownList = await db.getMarkdowns(pageId);
       setMarkdowns(markdownList);
     } catch (error) {
       console.error('Error loading markdowns:', error);
     }
   };
 
-  // Navigation handlers
-  const handlePreviousPage = () => {
-    if (!currentPage || pages.length === 0) return;
-    const currentIndex = pages.findIndex(p => p.id === currentPage.id);
-    if (currentIndex > 0) {
-      const prevPage = pages[currentIndex - 1];
-      setCurrentPage(prevPage);
-      loadMarkdowns(prevPage.id);
-    }
-  };
-
-  const handleNextPage = () => {
-    if (!currentPage || pages.length === 0) return;
-    const currentIndex = pages.findIndex(p => p.id === currentPage.id);
-    if (currentIndex < pages.length - 1) {
-      const nextPage = pages[currentIndex + 1];
-      setCurrentPage(nextPage);
-      loadMarkdowns(nextPage.id);
-    }
-  };
-
-  // Create new page
-  const handleNewPage = async () => {
-    if (!currentWorkspace) return;
+  const loadPages = async (workspaceId: number) => {
     try {
-      const title = await dialog.ask('Enter page title:', { title: 'New Page', kind: 'info' });
-      if (title) {
-        const pageId = await invoke<number>('create_page', { 
-          title: title || 'New Page', 
-          workspaceId: currentWorkspace.id 
-        });
-        await loadPages(currentWorkspace.id);
-        const newPage = await invoke<Page>('get_page', { pageId });
-        setCurrentPage(newPage);
-        loadMarkdowns(pageId);
+      const pageList = await db.getPages(workspaceId);
+      setPages(pageList);
+      if (pageList.length > 0) {
+        setCurrentPage(pageList[0]);
+        await loadMarkdowns(pageList[0].id);
+      } else {
+        setCurrentPage(null);
+        setMarkdowns([]);
       }
     } catch (error) {
-      console.error('Error creating new page:', error);
+      console.error('Error loading pages:', error);
     }
   };
 
-  // Create new workspace
+  const loadWorkspaces = async () => {
+    try {
+      const workspaceList = await db.getWorkspaces();
+      setWorkspaces(workspaceList);
+      
+      if (workspaceList.length > 0 && !currentWorkspace) {
+        setCurrentWorkspace(workspaceList[0]);
+        await loadPages(workspaceList[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading workspaces:', error);
+      throw error;
+    }
+  };
+
+  const initializeApp = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      await db.initialize();
+      await loadWorkspaces();
+    } catch (error) {
+      console.error('Error initializing app:', error);
+      setError('Failed to initialize application. Please try again.');
+      
+      await dialog.message('Failed to initialize application. Please restart the app.', {
+        title: 'Error',
+        kind: 'error'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handlers
+  const handleDeleteWorkspace = async () => {
+    if (!currentWorkspace) return;
+    
+    try {
+      const confirmed = await dialog.ask('Are you sure you would like to delete this workspace?', {
+        title: 'Delete Workspace',
+        kind: 'warning'
+      });
+
+      if (confirmed) {
+        await db.deleteWorkspace(currentWorkspace.id);
+        setCurrentWorkspace(null);
+        setCurrentPage(null);
+        setPages([]);
+        setMarkdowns([]);
+        await loadWorkspaces();
+
+        await dialog.message('Workspace deleted successfully', { 
+          title: 'Success',
+          kind: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting workspace:', error);
+      await dialog.message('Error deleting workspace', { 
+        title: 'Error',
+        kind: 'error'
+      });
+    }
+  };
+
+  const handleDeletePage = async () => {
+    if (!currentPage) return;
+    
+    try {
+      const confirmed = await dialog.ask('Are you sure you would like to delete this page?', {
+        title: 'Delete Page',
+        kind: 'warning'
+      });
+
+      if (confirmed) {
+        await db.deletePage(currentPage.id);
+        setCurrentPage(null);
+        setMarkdowns([]);
+        
+        if (currentWorkspace) {
+          await loadPages(currentWorkspace.id);
+        }
+
+        await dialog.message('Page deleted successfully', { 
+          title: 'Success',
+          kind: 'info'
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting page:', error);
+      await dialog.message('Error deleting page', { 
+        title: 'Error',
+        kind: 'error'
+      });
+    }
+  };
+
   const handleNewWorkspace = async (name: string) => {
     try {
       if (name.trim()) {
         const workspaceId = await db.createWorkspace(name);
         await loadWorkspaces();
+        
         const workspace = workspaces.find(w => w.id === workspaceId);
         if (workspace) {
           setCurrentWorkspace(workspace);
-          loadPages(workspaceId);
+          await loadPages(workspaceId);
         }
+        
         setIsWorkspaceDialogOpen(false);
-      } else {
-        await dialog.message('Name is empty', { title: 'Ekan', kind: 'error'});
+        setWorkspaceInput('');
       }
     } catch (error) {
-      console.error('Error creating new workspace:', error);
-      await dialog.message('Error creating workspace', { title: 'Ekan', kind: 'error'});
+      console.error('Error creating workspace:', error);
+      await dialog.message('Error creating workspace', { 
+        title: 'Error',
+        kind: 'error'
+      });
+    }
+  };
+
+  const handleNewPage = async (title: string) => {
+    if (!currentWorkspace || !title.trim()) return;
+    
+    try {
+      const pageId = await db.createPage(title, currentWorkspace.id);
+      await loadPages(currentWorkspace.id);
+      
+      const newPage = await db.getPage(pageId);
+      setCurrentPage(newPage);
+      await loadMarkdowns(pageId);
+      
+      setIsPageTitleDialogOpen(false);
+      setPageTitleInput('');
+    } catch (error) {
+      console.error('Error creating page:', error);
+      await dialog.message('Error creating page', { 
+        title: 'Error',
+        kind: 'error'
+      });
+    }
+  };
+
+  // Effects
+  useEffect(() => {
+    initializeApp();
+  }, []);
+
+  // Loading and error states
+  if (isLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-sm text-zinc-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-sm text-red-400">{error}</div>
+      </div>
+    );
+  }
+
+  // Navigation handlers
+  const handlePreviousPage = async () => {
+    if (!currentPage) return;
+    try {
+      const prevPage = await db.getPreviousPage(currentPage.id);
+      if (prevPage) {
+        setCurrentPage(prevPage);
+        loadMarkdowns(prevPage.id);
+      }
+    } catch (error) {
+      console.error('Error navigating to previous page:', error);
+    }
+  };
+
+  const handleNextPage = async () => {
+    if (!currentPage) return;
+    try {
+      const nextPage = await db.getNextPage(currentPage.id);
+      if (nextPage) {
+        setCurrentPage(nextPage);
+        loadMarkdowns(nextPage.id);
+      }
+    } catch (error) {
+      console.error('Error navigating to next page:', error);
     }
   };
 
@@ -166,11 +260,9 @@ export default function Home() {
   const handleSubmit = async () => {
     if (!currentPage || !inputContent.trim()) return;
     try {
-      const processedContent = await invoke<string>('process_markdown', { md: inputContent });
-      await invoke<number>('add_markdown', { 
-        content: processedContent, 
-        pageId: currentPage.id 
-      });
+      // Note: You'll need to implement markdown processing if needed
+      const processedContent = inputContent; // Add processing logic if needed
+      await db.addMarkdown(processedContent, currentPage.id);
       await loadMarkdowns(currentPage.id);
       setInputContent('');
       if (inputRef.current) {
@@ -185,23 +277,24 @@ export default function Home() {
   const handleExportWorkspace = async () => {
     if (!currentWorkspace) return;
     try {
-      const exported = await invoke('export_workspace', { workspaceId: currentWorkspace.id });
+      const exported = await db.exportWorkspace(currentWorkspace.id);
       const suggestedFilename = `${currentWorkspace.name.toLowerCase().replace(/\s+/g, '-')}-workspace.json`;
       
-      await dialog.save({
+      const filePath = await dialog.save({
         filters: [{
           name: 'JSON',
           extensions: ['json']
         }],
         defaultPath: suggestedFilename
-      }).then(async (filePath) => {
-        if (filePath) {
-          await invoke('plugin:fs|write_file', {
-            path: filePath,
-            contents: JSON.stringify(exported, null, 2)
-          });
-        }
       });
+
+      if (filePath) {
+        const fs = await import('@tauri-apps/plugin-fs');
+        await fs.writeFile({
+          path: filePath,
+          contents: JSON.stringify(exported, null, 2)
+        });
+      }
     } catch (error) {
       console.error('Error exporting workspace:', error);
     }
@@ -217,9 +310,10 @@ export default function Home() {
       });
       
       if (filePath) {
-        const contents = await invoke('plugin:fs|read_file', { path: filePath });
-        const workspaceExport = JSON.parse(contents as string);
-        const workspaceId = await invoke<number>('import_workspace', { workspaceExport });
+        const fs = await import('@tauri-apps/plugin-fs');
+        const contents = await fs.readFile(filePath);
+        const workspaceExport = JSON.parse(contents);
+        const workspaceId = await db.importWorkspace(workspaceExport);
         await loadWorkspaces();
         const workspace = workspaces.find(w => w.id === workspaceId);
         if (workspace) {
@@ -231,51 +325,6 @@ export default function Home() {
       console.error('Error importing workspace:', error);
     }
   };
-
-  const AddWorkspaceComponent: FC = () => {
-    const [workspaceName, setWorkspaceName] = useState('');
-    return (
-      <>
-        <button
-            onClick={() => setIsWorkspaceDialogOpen(true)}
-            className="p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
-          >
-            <Plus size={14} className="text-zinc-400" />
-          </button>
-
-        <Dialog
-          open={isWorkspaceDialogOpen}
-          onClose={() => setIsWorkspaceDialogOpen(false)} className="relative z-50"
-        >
-          <div className="fixed inset-0 flex w-screen items-center justify-center">
-            <DialogPanel className="max-w-lg space-y-2 border bg-zinc-900 px-6 py-2 rounded border-zinc-800 shadow-md shadow-slate-800/50">
-              <DialogTitle className="font-bold text-sm mb-4">Enter Workspace Name:</DialogTitle>
-              {/* <Description className=" text-xs mt-1">Please create workspace to start</Description> */}
-              <div>
-                <input 
-                  type="text" 
-                  onChange={e => setWorkspaceName(e.target.value)} 
-                  value={workspaceName} 
-                  placeholder='Name here ...'
-                  className='text-xs px-3 py-1 bg-black border rounded border-zinc-800 text-zinc-400'
-                  />
-              </div>
-              <div className="flex gap-2 w-full pt-2 pb-1 justify-end">
-                <button 
-                  onClick={() => setIsWorkspaceDialogOpen(false)}
-                  className='text-xs px-3 py-1 border rounded-sm border-zinc-800 bg-zinc-800 hover:bg-zinc-800/70'
-                  >Cancel</button>
-                <button 
-                  onClick={() => handleNewWorkspace(workspaceName)}
-                  className='text-xs px-3 py-1 border rounded-sm border-green-800 bg-green-800 hover:bg-green-800/70'
-                  >Create</button>
-              </div>
-            </DialogPanel>
-        </div>
-        </Dialog>
-      </>
-    )
-  }
 
   return (
     <div className="h-screen font-[family-name:var(--font-geist-sans)] p-3">
@@ -293,13 +342,20 @@ export default function Home() {
               }
             }}
           >
-            {workspaces.map(workspace => (
-              <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-            ))}
+            {workspaces.length === 0 ? (
+              <option value="">No workspaces</option>
+            ) : (
+              workspaces.map(workspace => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+              ))
+            )}
           </select>
-          
-          <AddWorkspaceComponent />
-
+          <button
+            onClick={() => setIsWorkspaceDialogOpen(true)}
+            className="p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
+          >
+            <Plus size={14} className="text-zinc-400" />
+          </button>
           <button
             onClick={handleExportWorkspace}
             className="p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
@@ -311,6 +367,12 @@ export default function Home() {
             className="p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
           >
             <Upload size={14} className="text-zinc-400" />
+          </button>
+          <button
+            onClick={handleDeleteWorkspace}
+            className="p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
+          >
+            <Trash2 size={14} className="text-zinc-400" />
           </button>
         </div>
 
@@ -339,13 +401,44 @@ export default function Home() {
               {currentPage?.title || 'No page selected'}
             </div>
             <button
-              onClick={handleNewPage}
-              className="ml-2 p-1 border border-zinc-700 rounded-sm hover:bg-zinc-900"
+              onClick={() => setIsPageTitleDialogOpen(true)}
+              className="ml-2 py-1 px-2 border border-zinc-700 rounded-sm hover:bg-zinc-900"
             >
               <Plus size={14} className="text-zinc-400" />
             </button>
+            <button
+                onClick={handleDeletePage}
+                disabled={!currentPage}
+                className="ml-1 py-1 px-2 border border-zinc-700 rounded-sm hover:bg-zinc-900 hover:border-red-700 hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed group"
+                title="Delete Page"
+              >
+              <Trash2 size={14} className="text-zinc-400 group-hover:text-red-400" />
+            </button>
           </div>
         </div>
+
+        {/* Dialogs */}
+        <DialogInput 
+          isOpen={isWorkspaceDialogOpen}
+          onClose={() => setIsWorkspaceDialogOpen(false)}
+          onSubmit={handleNewWorkspace}
+          title="Enter Workspace Name"
+          placeholder="Workspace name..."
+          submitText="Create Workspace"
+          value={workspaceInput}
+          setValue={setWorkspaceInput}
+        />
+
+        <DialogInput 
+          isOpen={isPageTitleDialogOpen}
+          onClose={() => setIsPageTitleDialogOpen(false)}
+          onSubmit={handleNewPage}
+          title="Enter Page Title"
+          placeholder="Page title..."
+          submitText="Create Page"
+          value={pageTitleInput}
+          setValue={setPageTitleInput}
+        />
 
         {/* Markdown List */}
         <div className="w-full h-full overflow-y-auto text-xs flex flex-col gap-2 py-2 font-[family-name:var(--font-geist-mono)] font-light">

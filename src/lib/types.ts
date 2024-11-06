@@ -12,18 +12,18 @@ export interface Page {
 }
 
 export interface Markdown {
-id: number;
-content: string;
-position: number;
-page_id: number;
+    id: number;
+    content: string;
+    position: number;
+    page_id: number;
 }
 
 export interface WorkspaceExport {
-workspace: Workspace;
-pages: PageExport[];
+    workspace: Workspace;
+    pages: PageExport[];
 }
 
 export interface PageExport {
-page: Page;
-markdowns: Markdown[];
+    page: Page;
+    markdowns: Markdown[];
 }

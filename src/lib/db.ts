@@ -3,16 +3,26 @@ import { Workspace, Page, Markdown, WorkspaceExport } from './types';
 
 class DatabaseService {
   private db: Database | null = null;
+  private initialized: boolean = false;
 
   async initialize() {
-    if (!this.db) {
+    if (this.initialized) return this.db;
+
+    try {
       this.db = await Database.load('sqlite:ekandata.db');
+      this.initialized = true;
+      return this.db;
+    } catch (error) {
+      console.error('Failed to initialize database:', error);
+      throw error;
     }
-    return this.db;
   }
 
   private async getDb() {
-    return this.db ?? await this.initialize();
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    return this.db!;
   }
 
   // Workspace operations
@@ -31,6 +41,21 @@ class DatabaseService {
       'SELECT id, name FROM workspaces ORDER BY id'
     );
     return result;
+  }
+
+  async getAWorkspace(workspaceId: number): Promise<Workspace> {
+    const db = await this.getDb();
+    const resultArray = await db.select<Workspace[]>(
+      'SELECT id, name FROM workspaces WHERE id=$1', [workspaceId]
+    );
+    const result = resultArray[0];
+    return result;
+  }
+
+  async deleteWorkspace(workspaceId: number): Promise<void> {
+    const db = await this.getDb();
+    // No need for manual cascade deletion since it's handled by the database
+    await db.execute('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
   }
 
   // Page operations
@@ -72,6 +97,12 @@ class DatabaseService {
     return result[0];
   }
 
+  async deletePage(pageId: number): Promise<void> {
+    const db = await this.getDb();
+    // No need for manual cascade deletion since it's handled by the database
+    await db.execute('DELETE FROM pages WHERE id = $1', [pageId]);
+  }
+
   // Markdown operations
   async addMarkdown(content: string, pageId: number): Promise<number> {
     const db = await this.getDb();
@@ -101,16 +132,16 @@ class DatabaseService {
 
   // Export/Import operations
   async exportWorkspace(workspaceId: number): Promise<WorkspaceExport> {
-    const workspaceResult = await (await this.getDb()).execute(
+    const workspaceResult = await (await this.getDb()).select<Workspace[]>(
       'SELECT id, name FROM workspaces WHERE id = $1',
       [workspaceId]
     );
 
-    if (workspaceResult.rows.length === 0) {
+    if (workspaceResult.length === 0) {
       throw new Error('Workspace not found');
     }
 
-    const workspace = workspaceResult.rows[0];
+    const workspace: Workspace = workspaceResult[0];
     const pages = await this.getPages(workspaceId);
     const pageExports = await Promise.all(
       pages.map(async (page) => ({
@@ -120,7 +151,7 @@ class DatabaseService {
     );
 
     return {
-      workspace,
+      workspace: workspace,
       pages: pageExports
     };
   }
