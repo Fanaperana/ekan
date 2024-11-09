@@ -6,6 +6,7 @@ import * as dialog from '@tauri-apps/plugin-dialog';
 import { db } from '@/lib/db';
 import type { Workspace, Page, Markdown } from '@/lib/types';
 import { DialogInput } from './components/DialogInout';
+import Form from "next/form";
 
 export default function Home() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -457,13 +458,13 @@ export default function Home() {
         </div>
 
         {/* Input Area */}
-        <div className="min-h-16 text-xs flex items-center relative group">
+        <div className="flex items-end relative group justify-items-center p-0">
           <div 
             ref={inputRef}
             contentEditable
             onInput={handleInputChange}
             onKeyDown={handleKeyDown}
-            className="border border-zinc-700 rounded w-full h-full p-1"
+            className="border border-zinc-700 rounded-sm w-full h-full p-1 font-thin overflow-y-auto text-xs max-h-20 min-h-20 inline-block focus-visible:ring-0 focus:border-0 focus-visible:border-0 focus-visible:outline-dashed focus-visible:outline-1 focus-visible:outline-zinc-500 focus-visible:p-1 font-[family-name:var(--font-geist-mono)]"
           />
           <button 
             onClick={handleSubmit}
